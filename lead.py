@@ -2,7 +2,6 @@ import os
 import re
 import sys
 import glob
-import yaml
 import json
 import shutil
 import jinja2
@@ -22,8 +21,6 @@ default_conf = {
 
 class Post(object):
 
-    yaml_pattern = r'---.*?---'
-
     def __init__(self, source_path):
         self.source = open(source_path).read()
 
@@ -34,14 +31,14 @@ class Post(object):
         self.filename = data.get('filename', None)
 
         self.raw_content = self.find_raw_content(self.source)
+        self.html = self.process_html(self.raw_content)
 
     def find_data(self, source):
-        matches = re.search(self.yaml_pattern, source, re.DOTALL)
-        data, empty = yaml.load_all(matches.group(0))
-        return data
+        return json.loads(source[:source.index('}') + 1])
 
     def find_raw_content(self, post):
-        return re.sub(self.yaml_pattern, '', post, count=0, flags=re.DOTALL)
+        content = post[post.index('}') + 1:]
+        return content.strip()
 
     def process_html(self, raw_content):
         return md.convert(raw_content)
@@ -63,8 +60,8 @@ def configure(root):
 def source(key=''):
     return os.path.join(root, conf.get(key, ''))
 
-def output(key=''):
-    return os.path.join(root, conf.get('output'), conf.get(key, ''))
+def output(key='', *args):
+    return os.path.join(root, conf.get('output'), conf.get(key, key), *args)
 
 def remove_old_builds():
     "For now, delete the old site"
@@ -79,8 +76,10 @@ def create_output_dirs():
 
 def move_assets():
     "Copy styles to site: later we can compress, etc"
-    shutil.copytree(source('styles'), output('styles')) 
-    shutil.copytree(source('images'), output('images')) 
+    if os.path.isdir(source('styles')):
+        shutil.copytree(source('styles'), output('styles')) 
+    if os.path.isdir(source('images')):
+        shutil.copytree(source('images'), output('images')) 
 
 def is_post(filename):
     "Given a file name, returns true if this is a post"
@@ -102,11 +101,11 @@ def build_blog():
     for path, dirs, filenames in os.walk(posts_dir):
         for post in fnmatch.filter(filenames, '*.yml'):
             p = Post(os.path.join(path, post))
-            ctx = {'posts': [p]}
+            ctx = {'post': p}
 
             template = env.get_template("%s.html" % p.layout)
 
-            out = open(os.path.join(output(), "%s.html" % p.slug()), 'w')
+            out = open(output('log', "%s.html" % p.slug()), 'w')
             out.write(template.render(ctx))
 
             posts.append(p)
@@ -126,18 +125,18 @@ def build_pages(posts):
         p = Post(page)
 
         ctx = {
-            'posts': processed_posts,
+            'posts': posts,
             'page': p
         }
 
         template = env.get_template("%s.html" % p.layout)
 
-        "TODO: This output needs to get fixed"
-        out = open(os.path.join(output(), "%s.html" % p.filename), 'w')
+        out = open(output("%s.html" % p.filename), 'w')
         out.write(template.render(ctx))
 
 if __name__ == '__main__':
-    print "Started"
+    print "Started Lead."
+
     "argument to script is root site folder"
     root = sys.argv[1]
 
@@ -152,4 +151,4 @@ if __name__ == '__main__':
     posts = build_blog()
     build_pages(posts)
 
-    # move_assets()
+    move_assets()

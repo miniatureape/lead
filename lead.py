@@ -8,6 +8,7 @@ import jinja2
 import fnmatch
 import markdown2
 from datetime import datetime
+from operator import attrgetter
 
 root = ""
 
@@ -27,6 +28,7 @@ class Post(object):
         data = self.find_data(self.source)
         self.title = data.get('title', 'Untitled')
         self.date = data.get('date', None)
+        self.time = datetime.strptime(self.date, "%m-%d-%y").strftime("%s")
         self.layout = data.get('layout')
         self.filename = data.get('filename', None)
 
@@ -49,6 +51,7 @@ class Post(object):
     def slugify(self, title):
         return re.sub(r'[^a-zA-Z0-9_-]', '-', title).lower()    
 
+
 def configure(root):
     conf = {}
     full_path = os.path.join(root, 'conf.json')
@@ -62,6 +65,12 @@ def source(key=''):
 
 def output(key='', *args):
     return os.path.join(root, conf.get('output'), conf.get(key, key), *args)
+
+def write(filename, content):
+    if os.path.exists(filename):
+        print "Warning: %s already exists. Overwriting." % filename
+    out = open(filename, 'w')
+    out.write(content)
 
 def remove_old_builds():
     "For now, delete the old site"
@@ -105,8 +114,8 @@ def build_blog():
 
             template = env.get_template("%s.html" % p.layout)
 
-            out = open(output('log', "%s.html" % p.slug()), 'w')
-            out.write(template.render(ctx))
+            filename = output('log', "%s.html" % p.slug())
+            write(filename, template.render(ctx))
 
             posts.append(p)
 
@@ -131,8 +140,8 @@ def build_pages(posts):
 
         template = env.get_template("%s.html" % p.layout)
 
-        out = open(output("%s.html" % p.filename), 'w')
-        out.write(template.render(ctx))
+        filename = output("%s.html" % p.filename)
+        write(filename, template.render(ctx))
 
 if __name__ == '__main__':
     print "Started Lead."
@@ -142,13 +151,15 @@ if __name__ == '__main__':
 
     conf = configure(root)
 
-    md = markdown2.Markdown()
+    md = markdown2.Markdown(extras=['code-color'])
     env = jinja2.Environment(loader=jinja2.FileSystemLoader(source('layouts')))
 
     remove_old_builds()
     create_output_dirs()
 
     posts = build_blog()
+    posts = sorted(posts, key=attrgetter('time'), reverse=True)
+
     build_pages(posts)
 
     move_assets()

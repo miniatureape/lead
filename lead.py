@@ -6,10 +6,13 @@ import json
 import shutil
 import jinja2
 import fnmatch
+import optparse
 import markdown2
 from datetime import datetime
 from operator import attrgetter
 
+md   = None
+env  = None
 root = ""
 
 default_conf = {
@@ -28,7 +31,7 @@ class Post(object):
         data = self.find_data(self.source)
         self.title = data.get('title', 'Untitled')
         self.date = data.get('date', None)
-        self.time = datetime.strptime(self.date, "%m-%d-%y").strftime("%s")
+        self.time = datetime.strptime(self.date, "%Y-%m-%d").strftime("%s")
         self.layout = data.get('layout')
         self.filename = data.get('filename', None)
 
@@ -70,7 +73,7 @@ def write(filename, content):
     if os.path.exists(filename):
         print "Warning: %s already exists. Overwriting." % filename
     out = open(filename, 'w')
-    out.write(content)
+    out.write(content.encode('utf-8'))
 
 def remove_old_builds():
     "For now, delete the old site"
@@ -92,7 +95,7 @@ def move_assets():
 
 def is_post(filename):
     "Given a file name, returns true if this is a post"
-    return os.path.splitext(filename)[1] == '.yml'
+    return os.path.splitext(filename)[1] == '.md'
 
 "A little Like os.walk, but filters on dirs"
 def walk(root, dirfilter, filefilter):
@@ -108,7 +111,7 @@ def build_blog():
     posts_dir = source('posts')
 
     for path, dirs, filenames in os.walk(posts_dir):
-        for post in fnmatch.filter(filenames, '*.yml'):
+        for post in fnmatch.filter(filenames, '*.md'):
             p = Post(os.path.join(path, post))
             ctx = {'post': p}
 
@@ -143,13 +146,10 @@ def build_pages(posts):
         filename = output("%s.html" % p.filename)
         write(filename, template.render(ctx))
 
-if __name__ == '__main__':
-    print "Started Lead."
 
-    "argument to script is root site folder"
-    root = sys.argv[1]
-
-    conf = configure(root)
+def build_site():
+    global md
+    global env
 
     md = markdown2.Markdown(extras=['code-color'])
     env = jinja2.Environment(loader=jinja2.FileSystemLoader(source('layouts')))
@@ -163,3 +163,27 @@ if __name__ == '__main__':
     build_pages(posts)
 
     move_assets()
+
+def test_site(site):
+    import SimpleHTTPServer
+    import SocketServer
+
+    os.chdir(site)
+    PORT = 8000
+    Handler = SimpleHTTPServer.SimpleHTTPRequestHandler
+    httpd = SocketServer.TCPServer(("", PORT), Handler)
+
+    print "serving at port", PORT
+    httpd.serve_forever()
+
+if __name__ == '__main__':
+    conf = configure(root)
+    root = os.getcwd()
+
+    parser = optparse.OptionParser()
+    options, args = parser.parse_args()
+
+    if not args:
+        build_site()
+    elif args[0] == 'test':
+        test_site(output())

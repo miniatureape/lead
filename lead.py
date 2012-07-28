@@ -8,8 +8,10 @@ import jinja2
 import fnmatch
 import optparse
 import markdown2
+from PIL import Image
 from datetime import datetime
 from operator import attrgetter
+
 
 md   = None
 env  = None
@@ -18,7 +20,9 @@ root = ""
 default_conf = {
     'posts': 'log',
     'styles': 'styles',
+    'scripts': 'scripts',
     'images': 'images',
+    'log_images': 'images/log',
     'output': '_site',
     'layouts': '_layouts',
 }
@@ -45,7 +49,35 @@ class Post(object):
         content = post[post.index('}') + 1:]
         return content.strip()
 
+    def replace_images(self, content):
+        def is_log_image(match):
+            image_name = match.group(0)
+            replace_str = image_name
+
+            base, ext = os.path.splitext(image_name)
+
+            log_images_dir = conf.get('log_images')
+            orig_image_path = os.path.join(log_images_dir, image_name)
+
+            if os.path.exists(orig_image_path):
+                im = Image.open(orig_image_path)
+
+                im.thumbnail((1024, 1024))
+                medium_name = "%s.medium.%s" % (base, ext,)
+                im.save(os.path.join(log_images_dir,medium_name))
+
+                full_path = os.path.join('/', log_images_dir, image_name)
+                medium_path = os.path.join('/', log_images_dir, medium_name)
+
+                replace_str = '<a href="%s"><img class="log-image" src="%s" /></a>' % (full_path, medium_path)
+
+            return replace_str
+
+        return re.sub(r'[a-zA-Z0-9_-]+\.(jpg|jpeg|gif|png)', is_log_image, content)
+
+
     def process_html(self, raw_content):
+        raw_content = self.replace_images(raw_content)
         return md.convert(raw_content)
 
     def slug(self):
@@ -86,12 +118,12 @@ def create_output_dirs():
     os.mkdir(output())
     if not os.path.exists(output('log')): os.mkdir(output('log'))
 
-def move_assets():
+def move_assets(assets):
     "Copy styles to site: later we can compress, etc"
-    if os.path.isdir(source('styles')):
-        shutil.copytree(source('styles'), output('styles')) 
-    if os.path.isdir(source('images')):
-        shutil.copytree(source('images'), output('images')) 
+    assets_dirs = [conf.get(asset) for asset in assets]
+    for asset_dir in assets_dirs:
+        if os.path.isdir(source(asset_dir)):
+            shutil.copytree(source(asset_dir), output(asset_dir)) 
 
 def is_post(filename):
     "Given a file name, returns true if this is a post"
@@ -134,7 +166,7 @@ def build_pages(posts):
         return os.path.splitext(item)[1] == '.html'
 
     for fullpath, page in walk(source(), dirfilter, htmlfilter):
-        p = Post(page)
+        p = Post(fullpath)
 
         ctx = {
             'posts': posts,
@@ -145,7 +177,6 @@ def build_pages(posts):
 
         filename = output("%s.html" % p.filename)
         write(filename, template.render(ctx))
-
 
 def build_site():
     global md
@@ -162,7 +193,7 @@ def build_site():
 
     build_pages(posts)
 
-    move_assets()
+    move_assets(('images', 'styles'))
 
 def test_site(site):
     import SimpleHTTPServer
@@ -176,6 +207,15 @@ def test_site(site):
     print "serving at port", PORT
     httpd.serve_forever()
 
+def update_static():
+    output_dirs = (output(conf.get('styles')), output(conf.get('scripts')))
+    for output_dir in output_dirs:
+        try:
+            shutil.rmtree(output_dir)
+        except:
+            print("Warning: %s does not exist" % output_dir)
+    move_assets(('styles', 'scripts'))
+
 if __name__ == '__main__':
     conf = configure(root)
     root = os.getcwd()
@@ -187,3 +227,5 @@ if __name__ == '__main__':
         build_site()
     elif args[0] == 'test':
         test_site(output())
+    elif args[0] == 'static':
+        update_static()

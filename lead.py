@@ -9,6 +9,7 @@ import fnmatch
 import optparse
 import markdown2
 from PIL import Image
+from datetime import date
 from datetime import datetime
 from operator import attrgetter
 
@@ -81,11 +82,10 @@ class Post(object):
         return md.convert(raw_content)
 
     def slug(self):
-        return self.slugify(self.title)
+        return slugify(self.title)
 
-    def slugify(self, title):
-        return re.sub(r'[^a-zA-Z0-9_-]', '-', title).lower()    
-
+def slugify(title):
+    return re.sub(r'[^a-zA-Z0-9_-]', '-', title).lower()    
 
 def configure(root):
     conf = {}
@@ -196,15 +196,20 @@ def build_site():
     move_assets(('images', 'styles'))
 
 def test_site(site):
+    import BaseHTTPServer
+    import fcntl
     import SimpleHTTPServer
     import SocketServer
 
     os.chdir(site)
-    PORT = 8000
-    Handler = SimpleHTTPServer.SimpleHTTPRequestHandler
-    httpd = SocketServer.TCPServer(("", PORT), Handler)
+    server_address = ('', 8000)
+    httpd = BaseHTTPServer.HTTPServer(server_address, SimpleHTTPServer.SimpleHTTPRequestHandler)
 
-    print "serving at port", PORT
+    flags = fcntl.fcntl(httpd.socket.fileno(), fcntl.F_GETFD)
+    flags |= fcntl.FD_CLOEXEC
+    fcntl.fcntl(httpd.socket.fileno(), fcntl.F_SETFD, flags)
+
+    print "serving at port", 8000 
     httpd.serve_forever()
 
 def update_static():
@@ -215,6 +220,30 @@ def update_static():
         except:
             print("Warning: %s does not exist" % output_dir)
     move_assets(('styles', 'scripts'))
+
+def usage():
+    pass
+
+def new_post():
+    "Quick start a new post"
+    stub = {
+        "title": "Untitled Post",
+        "date": date.today().strftime("%Y-%m-%d"),
+        "layout": "post",
+    }
+
+    filename = "%s-%s.md" % (stub.get('title'), stub.get('date'))
+    filename = slugify(filename)
+    path = os.path.join(root, conf.get('posts'), filename)
+
+    if os.path.exists(path):
+        print "Stub already exists: %s" % filename
+        return 
+
+    with open(path, 'w') as f:
+        f.write(json.dumps(stub, indent=4))
+
+    print path
 
 if __name__ == '__main__':
     conf = configure(root)
@@ -229,3 +258,5 @@ if __name__ == '__main__':
         test_site(output())
     elif args[0] == 'static':
         update_static()
+    elif args[0] == 'new':
+        new_post()

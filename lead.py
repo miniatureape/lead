@@ -8,6 +8,7 @@ import jinja2
 import fnmatch
 import optparse
 import markdown2
+import subprocess
 from PIL import Image
 from datetime import date
 from datetime import datetime
@@ -19,13 +20,15 @@ env  = None
 root = ""
 
 default_conf = {
-    'posts': 'log',
-    'styles': 'styles',
-    'scripts': 'scripts',
-    'images': 'images',
-    'log_images': 'images/log',
-    'output': '_site',
-    'layouts': '_layouts',
+    'posts'      : 'log',
+    'styles'     : 'styles',
+    'scripts'    : 'scripts',
+    'demos'      : 'demos',
+    'images'     : 'images',
+    'log_images' : 'images/log',
+    'output'     : '_site',
+    'layouts'    : '_layouts',
+    'remote_location' : 'root@cactus:/var/www/justindonato/',
 }
 
 class Post(object):
@@ -118,7 +121,7 @@ def create_output_dirs():
     os.mkdir(output())
     if not os.path.exists(output('log')): os.mkdir(output('log'))
 
-def move_assets(assets):
+def move_assets(*assets):
     "Copy styles to site: later we can compress, etc"
     assets_dirs = [conf.get(asset) for asset in assets]
     for asset_dir in assets_dirs:
@@ -194,7 +197,7 @@ def build_site():
 
     build_pages(posts)
 
-    move_assets(('images', 'styles'))
+    move_assets('images', 'styles')
 
 def test_site():
     "Run an HTTP server to serve output directory for testing"
@@ -213,9 +216,8 @@ def test_site():
     flags |= fcntl.FD_CLOEXEC
     fcntl.fcntl(httpd.socket.fileno(), fcntl.F_SETFD, flags)
 
+    print "Serving locally at port", 8000 
     httpd.serve_forever()
-
-    return "serving at port", 8000 
 
 def update_static():
     "Build and move only static assets to output directory"
@@ -225,7 +227,7 @@ def update_static():
             shutil.rmtree(output_dir)
         except:
             print("Warning: %s does not exist" % output_dir)
-    move_assets(('styles', 'scripts'))
+    move_assets('styles', 'scripts')
 
 def new_post():
     "Quickly start a new post"
@@ -247,6 +249,17 @@ def new_post():
 
     return path
 
+def push_remote():
+    "Sync output folder with remote server"
+    command = "rsync -v -e ssh %s %s" % (output(), conf.get('remote_location'))
+    print command
+    p = subprocess.Popen(command.split(),
+        shell=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE) 
+    stdout, stderr = p.communicate()
+    print stdout, stderr
+
 def invalid_command():
     return "Unknown command. Try one of: %s" % ', '.join(commands.keys())
 
@@ -263,6 +276,7 @@ commands = {
     "test"   : test_site,
     "static" : update_static,
     "new"    : new_post,
+    "push"   : push_remote,
     "help"   : command_help,
 }
 

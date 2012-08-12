@@ -179,6 +179,7 @@ def build_pages(posts):
         write(filename, template.render(ctx))
 
 def build_site():
+    "Build all content and move with static assets to output directory"
     global md
     global env
 
@@ -195,7 +196,10 @@ def build_site():
 
     move_assets(('images', 'styles'))
 
-def test_site(site):
+def test_site():
+    "Run an HTTP server to serve output directory for testing"
+    site = output()
+
     import BaseHTTPServer
     import fcntl
     import SimpleHTTPServer
@@ -209,10 +213,12 @@ def test_site(site):
     flags |= fcntl.FD_CLOEXEC
     fcntl.fcntl(httpd.socket.fileno(), fcntl.F_SETFD, flags)
 
-    print "serving at port", 8000 
     httpd.serve_forever()
 
+    return "serving at port", 8000 
+
 def update_static():
+    "Build and move only static assets to output directory"
     output_dirs = (output(conf.get('styles')), output(conf.get('scripts')))
     for output_dir in output_dirs:
         try:
@@ -221,11 +227,8 @@ def update_static():
             print("Warning: %s does not exist" % output_dir)
     move_assets(('styles', 'scripts'))
 
-def usage():
-    pass
-
 def new_post():
-    "Quick start a new post"
+    "Quickly start a new post"
     stub = {
         "title": "Untitled Post",
         "date": date.today().strftime("%Y-%m-%d"),
@@ -237,26 +240,57 @@ def new_post():
     path = os.path.join(root, conf.get('posts'), filename)
 
     if os.path.exists(path):
-        print "Stub already exists: %s" % filename
-        return 
+        return "Stub already exists: %s" % filename
 
     with open(path, 'w') as f:
         f.write(json.dumps(stub, indent=4))
 
-    print path
+    return path
+
+def invalid_command():
+    return "Unknown command. Try one of: %s" % ', '.join(commands.keys())
+
+def command_help(command_name):
+    "Pass command name for usage help"
+    command = commands.get(command_name, None)
+    if command:
+        print command.__doc__
+    else:
+        print invalid_command()
+
+commands = {
+    "build"  : build_site,
+    "test"   : test_site,
+    "static" : update_static,
+    "new"    : new_post,
+    "help"   : command_help,
+}
 
 if __name__ == '__main__':
     conf = configure(root)
     root = os.getcwd()
 
-    parser = optparse.OptionParser()
-    options, args = parser.parse_args()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('command', default="", help="The command to run.", nargs='*')
+    args = parser.parse_args()
 
-    if not args:
-        build_site()
-    elif args[0] == 'test':
-        test_site(output())
-    elif args[0] == 'static':
-        update_static()
-    elif args[0] == 'new':
-        new_post()
+    try:
+        command = args.command[0]
+    except IndexError:
+        command_help("")
+        exit()
+    
+    if command == 'help':
+        if len(args.command) > 1:
+            command_name = args.command[1]
+            command_help(command_name)
+        else:
+            print command_help.__doc__
+        exit()
+        
+    command = commands.get(command, invalid_command)
+    result = command()
+
+    if result:
+        print result

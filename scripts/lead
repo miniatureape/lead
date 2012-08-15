@@ -1,0 +1,5 @@
+PROJECT_DIR=/home/justin/projects/lead/
+PYENV=${PROJECT_DIR}env/bin/activate
+source $PYENV
+python ${PROJECT_DIR}lead.py $@
+deactivate

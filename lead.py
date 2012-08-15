@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import os
 import re
 import sys
@@ -12,8 +14,8 @@ import subprocess
 from PIL import Image
 from datetime import date
 from datetime import datetime
+from bs4 import BeautifulSoup
 from operator import attrgetter
-
 
 md   = None
 env  = None
@@ -79,7 +81,6 @@ class Post(object):
 
         return re.sub(r'[a-zA-Z0-9_-]+\.(jpg|jpeg|gif|png)', is_log_image, content)
 
-
     def process_html(self, raw_content):
         raw_content = self.replace_images(raw_content)
         return md.convert(raw_content)
@@ -120,6 +121,7 @@ def create_output_dirs():
     "Create output directories"
     os.mkdir(output())
     if not os.path.exists(output('log')): os.mkdir(output('log'))
+    if not os.path.exists(output('demos')): os.mkdir(output('demos'))
 
 def move_assets(*assets):
     "Copy styles to site: later we can compress, etc"
@@ -181,13 +183,18 @@ def build_pages(posts):
         filename = output("%s.html" % p.filename)
         write(filename, template.render(ctx))
 
+def init_markdown():
+    global md
+    md = markdown2.Markdown(extras=['code-color'])
+
+def init_jinja():
+    global env
+    env = jinja2.Environment(loader=jinja2.FileSystemLoader(source('layouts')))
+
 def build_site():
     "Build all content and move with static assets to output directory"
-    global md
-    global env
-
-    md = markdown2.Markdown(extras=['code-color'])
-    env = jinja2.Environment(loader=jinja2.FileSystemLoader(source('layouts')))
+    init_markdown();
+    init_jinja();
 
     remove_old_builds()
     create_output_dirs()
@@ -197,7 +204,35 @@ def build_site():
 
     build_pages(posts)
 
+    build_demos()
     move_assets('images', 'styles')
+
+def build_demos():
+    "Find all HTML files in the demo directory and syntax highlight them"
+    pygment_prefix = '    :::javascript'
+
+    demos_dir = conf.get('demos', None)
+
+    if not demos_dir:
+        return
+
+    pattern = os.path.join(demos_dir, '*.html')
+    demos = glob.glob(pattern)
+
+    for demo in demos:
+        with open(demo) as f:
+            html = BeautifulSoup(f.read())
+            script = html.find('script')
+            script_text = pygment_prefix + script.text
+            highlighted = md.convert(script_text)
+            code = html.select('#code')[0]
+            code.append(highlighted)
+            output_html = html.prettify(formatter=None)
+
+        output_file = os.path.join(output('demos'), os.path.basename(demo))
+
+        with open(output_file, 'w') as f:
+            f.write(output_html)
 
 def test_site():
     "Run an HTTP server to serve output directory for testing"
@@ -221,12 +256,14 @@ def test_site():
 
 def update_static():
     "Build and move only static assets to output directory"
-    output_dirs = (output(conf.get('styles')), output(conf.get('scripts')))
+    output_dirs = (output(conf.get('styles')), 
+                    output(conf.get('scripts')),)
     for output_dir in output_dirs:
         try:
             shutil.rmtree(output_dir)
         except:
             print("Warning: %s does not exist" % output_dir)
+
     move_assets('styles', 'scripts')
 
 def new_post():

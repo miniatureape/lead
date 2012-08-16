@@ -209,7 +209,10 @@ def build_site():
 
 def build_demos():
     "Find all HTML files in the demo directory and syntax highlight them"
-    pygment_prefix = '    :::javascript'
+
+    pygment_prefix = '    :::'
+    js_prefix = "%s%s" % (pygment_prefix, 'javascript')
+    css_prefix = "%s%s" % (pygment_prefix, 'css')
 
     demos_dir = conf.get('demos', None)
 
@@ -222,11 +225,19 @@ def build_demos():
     for demo in demos:
         with open(demo) as f:
             html = BeautifulSoup(f.read())
-            script = html.find('script')
-            script_text = pygment_prefix + script.text
-            highlighted = md.convert(script_text)
+
             code = html.select('#code')[0]
+            script_text = js_prefix + code.text
+            highlighted = md.convert(script_text)
+            code.clear()
             code.append(highlighted)
+
+            css = html.select('#css')[0]
+            css_text = css_prefix + css.text
+            highlighted = md.convert(css_text)
+            css.clear()
+            css.append(highlighted)
+
             output_html = html.prettify(formatter=None)
 
         output_file = os.path.join(output('demos'), os.path.basename(demo))

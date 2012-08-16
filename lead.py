@@ -222,28 +222,29 @@ def build_demos():
     pattern = os.path.join(demos_dir, '*.html')
     demos = glob.glob(pattern)
 
+    template = env.get_template("demo.html")
+
     for demo in demos:
         with open(demo) as f:
-            html = BeautifulSoup(f.read())
+            data = json.loads(f.read())
 
-            code = html.select('#code')[0]
-            script_text = js_prefix + code.text
-            highlighted = md.convert(script_text)
-            code.clear()
-            code.append(highlighted)
+            js = data.get('js', '')
+            css = data.get('css', '')
+            html = data.get('html', '')
 
-            css = html.select('#css')[0]
-            css_text = css_prefix + css.text
-            highlighted = md.convert(css_text)
-            css.clear()
-            css.append(highlighted)
+            fmt_js = ''
+            if js:
+                fmt_js = md.convert(js_prefix + js)
 
-            output_html = html.prettify(formatter=None)
+            ctx = {
+                "js": js,
+                "html": html,
+                "css": css,
+                "fmt_js": fmt_js,
+            }
 
         output_file = os.path.join(output('demos'), os.path.basename(demo))
-
-        with open(output_file, 'w') as f:
-            f.write(output_html)
+        write(output_file, template.render(ctx))
 
 def test_site():
     "Run an HTTP server to serve output directory for testing"

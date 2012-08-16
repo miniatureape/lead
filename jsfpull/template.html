@@ -1,13 +1,35 @@
 <!doctype html>
 <html>
     <head>
+        <link href="/styles/demo.css" rel="stylesheet"></link>
         <style>
             $css
         </style>
     </head>
     <body>
-        $html
-        <div id="code"></div>
+
+        <ul id="example-tabs">
+            <li class="selected" data-type='example'>example</li>
+            <li data-type='js'>js</li>
+            <li data-type='css'>css</li>
+        </ul>
+
+        <div id="example-container">
+            <div id="example">
+            $html
+            </div>
+
+            <div id="code">
+                $js
+            </div>
+
+            <div id="css">
+                $css
+            </div>
+        </div>
+
+        <script src="//ajax.googleapis.com/ajax/libs/jquery/1.8.0/jquery.min.js"></script>
+        <script src="/scripts/demo.js"></script>
         <script>
         $js
         </script>

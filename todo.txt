@@ -1,4 +1,2 @@
-- jsfpull should just make a json structure and templating should be done at build time
 - Find images and move them to the right folders
-- Add upload commands, hooks
-- Add flag that doesn't rebuild assets so you can tweak styles in a tighter loop
+- Remove highlighting code. Gray background, monospaced text. Whatever. 

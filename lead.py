@@ -120,7 +120,7 @@ def remove_old_builds():
 def create_output_dirs():
     "Create output directories"
     os.mkdir(output())
-    if not os.path.exists(output('log')): os.mkdir(output('log'))
+    if not os.path.exists(output('notebook')): os.mkdir(output('notebook'))
     if not os.path.exists(output('demos')): os.mkdir(output('demos'))
 
 def move_assets(*assets):
@@ -154,7 +154,7 @@ def build_blog():
 
             template = env.get_template("%s.html" % p.layout)
 
-            filename = output('log', "%s.html" % p.slug())
+            filename = output('notebook', "%s.html" % p.slug())
             write(filename, template.render(ctx))
 
             posts.append(p)
@@ -185,7 +185,7 @@ def build_pages(posts):
 
 def init_markdown():
     global md
-    md = markdown2.Markdown(extras=['code-color'])
+    md = markdown2.Markdown(extras=['fenced-code-blocks'])
 
 def init_jinja():
     global env
@@ -210,9 +210,9 @@ def build_site():
 def build_demos():
     "Find all HTML files in the demo directory and syntax highlight them"
 
-    pygment_prefix = '    :::'
-    js_prefix = "%s%s" % (pygment_prefix, 'javascript')
-    css_prefix = "%s%s" % (pygment_prefix, 'css')
+    pygment_afix = '```'
+    js_prefix = "%s%s\n" % (pygment_afix, 'javascript')
+    css_prefix = "%s%s\n" % (pygment_afix, 'css')
 
     demos_dir = conf.get('demos', None)
 
@@ -234,7 +234,8 @@ def build_demos():
 
             fmt_js = ''
             if js:
-                fmt_js = md.convert(js_prefix + js)
+                code = js_prefix + js + "\n" + pygment_afix
+                fmt_js = md.convert(code)
 
             ctx = {
                 "js": js,
@@ -300,7 +301,7 @@ def new_post():
 
 def push_remote():
     "Sync output folder with remote server"
-    command = "rsync -v -e ssh %s %s" % (output(), conf.get('remote_location'))
+    command = "rsync -r -v -e ssh %s %s" % (output(), conf.get('remote_location'))
     print command
     p = subprocess.Popen(command.split(),
         shell=False,

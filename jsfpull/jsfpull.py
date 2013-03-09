@@ -25,10 +25,10 @@ def get_fiddle_data(url):
         "js": select(html, js_id),
     }
 
-url = sys.argv[1]
-if not url:
+if not len(sys.argv) > 1:
     print 'Must specify url'
     exit()
 
+url = sys.argv[1]
 data = get_fiddle_data(url)
 print json.dumps(data, indent=4)

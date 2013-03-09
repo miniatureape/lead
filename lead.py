@@ -9,13 +9,16 @@ import shutil
 import jinja2
 import fnmatch
 import optparse
-import markdown2
+import markdown
 import subprocess
 from PIL import Image
 from datetime import date
 from datetime import datetime
 from bs4 import BeautifulSoup
 from operator import attrgetter
+from pygments import highlight
+from pygments.lexers import get_lexer_by_name
+from pygments.formatters import HtmlFormatter
 
 md   = None
 env  = None
@@ -53,7 +56,19 @@ class Post(object):
 
     def find_raw_content(self, post):
         content = post[post.index('}') + 1:]
-        return content.strip()
+        return content.decode('utf-8').strip()
+
+    def replace_code(self, content):
+        def highlight_code(match):
+            lexer_name = match.group(1)
+            code = match.group(2)
+
+            lexer = get_lexer_by_name(lexer_name, stripall=True)
+            formatter = HtmlFormatter(linenos=True, cssclass="source")
+
+            return "<div class='code-block'>%s</div>" % highlight(code, lexer, formatter)
+
+        return re.sub(r"```(\w+)\s*\n+(.*?)```", highlight_code, content, flags=re.DOTALL|re.UNICODE)
 
     def replace_images(self, content):
         def is_log_image(match):
@@ -68,12 +83,18 @@ class Post(object):
             if os.path.exists(orig_image_path):
                 im = Image.open(orig_image_path)
 
-                im.thumbnail((1024, 1024))
-                medium_name = "%s.medium.%s" % (base, ext,)
-                im.save(os.path.join(log_images_dir,medium_name))
+                medium_name = None
+
+                if im.size[0] > 1024 or im.size[1] > 1024:
+                    im.thumbnail((1024, 1024))
+                    medium_name = "%s.medium%s" % (base, ext,)
+                    im.save(os.path.join(log_images_dir,medium_name))
 
                 full_path = os.path.join('/', log_images_dir, image_name)
-                medium_path = os.path.join('/', log_images_dir, medium_name)
+                if medium_name:
+                    medium_path = os.path.join('/', log_images_dir, medium_name)
+                else:
+                    medium_path = full_path
 
                 replace_str = '<a href="%s"><img class="log-image" src="%s" /></a>' % (full_path, medium_path)
 
@@ -83,7 +104,8 @@ class Post(object):
 
     def process_html(self, raw_content):
         raw_content = self.replace_images(raw_content)
-        return md.convert(raw_content)
+        raw_content = self.replace_code(raw_content)
+        return markdown.markdown(raw_content)
 
     def slug(self):
         return slugify(self.title)
@@ -183,17 +205,12 @@ def build_pages(posts):
         filename = output("%s.html" % p.filename)
         write(filename, template.render(ctx))
 
-def init_markdown():
-    global md
-    md = markdown2.Markdown(extras=['fenced-code-blocks'])
-
 def init_jinja():
     global env
     env = jinja2.Environment(loader=jinja2.FileSystemLoader(source('layouts')))
 
 def build_site():
     "Build all content and move with static assets to output directory"
-    init_markdown();
     init_jinja();
 
     remove_old_builds()
@@ -234,8 +251,9 @@ def build_demos():
 
             fmt_js = ''
             if js:
-                code = js_prefix + js + "\n" + pygment_afix
-                fmt_js = md.convert(code)
+                lexer = get_lexer_by_name('js', stripall=True)
+                formatter = HtmlFormatter(linenos=True, cssclass="source")
+                fmt_js = highlight(js, lexer, formatter)
 
             ctx = {
                 "js": js,

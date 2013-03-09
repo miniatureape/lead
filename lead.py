@@ -33,7 +33,7 @@ default_conf = {
     'log_images' : 'images/log',
     'output'     : '_site',
     'layouts'    : '_layouts',
-    'remote_location' : 'root@cactus:/var/www/justindonato/',
+    'remote_location' : '',
 }
 
 class Post(object):

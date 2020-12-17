@@ -25,12 +25,12 @@ env  = None
 root = ""
 
 default_conf = {
-    'posts'      : 'log',
-    'styles'     : 'styles',
-    'scripts'    : 'scripts',
-    'demos'      : 'demos',
-    'images'     : 'images',
-    'log_images' : 'images/log',
+    'posts'      : '_log',
+    'styles'     : '_styles',
+    'scripts'    : '_scripts',
+    'demos'      : '_demos',
+    'images'     : '_images',
+    'log_images' : '_images/log',
     'output'     : '_site',
     'layouts'    : '_layouts',
     'remote_location' : '',
@@ -49,14 +49,17 @@ class Post(object):
         self.filename = data.get('filename', None)
 
         self.raw_content = self.find_raw_content(self.source)
-        self.html = self.process_html(self.raw_content)
+        if data.get('raw', None):
+            self.html = self.raw_content
+        else:
+            self.html = self.process_html(self.raw_content)
 
     def find_data(self, source):
         return json.loads(source[:source.index('}') + 1])
 
     def find_raw_content(self, post):
         content = post[post.index('}') + 1:]
-        return content.decode('utf-8').strip()
+        return content.strip()
 
     def replace_code(self, content):
         def highlight_code(match):
@@ -80,6 +83,9 @@ class Post(object):
             log_images_dir = conf.get('log_images')
             orig_image_path = os.path.join(log_images_dir, image_name)
 
+            # todo this is another dirty hack to get the _ off the output dirs
+            log_images_dir = log_images_dir.replace("_", "", 1)
+
             if os.path.exists(orig_image_path):
                 im = Image.open(orig_image_path)
 
@@ -88,7 +94,7 @@ class Post(object):
                 if im.size[0] > 1024 or im.size[1] > 1024:
                     im.thumbnail((1024, 1024))
                     medium_name = "%s.medium%s" % (base, ext,)
-                    im.save(os.path.join(log_images_dir,medium_name))
+                    im.save(os.path.join(log_images_dir, medium_name))
 
                 full_path = os.path.join('/', log_images_dir, image_name)
                 if medium_name:
@@ -118,20 +124,22 @@ def configure(root):
     full_path = os.path.join(root, 'conf.json')
     if os.path.isfile(full_path):
         conf = json.load(open(full_path))
-    conf.update(default_conf)
-    return conf
+    default_conf.update(conf)
+    return default_conf
 
 def source(key=''):
     return os.path.join(root, conf.get(key, ''))
 
 def output(key='', *args):
-    return os.path.join(root, conf.get('output'), conf.get(key, key), *args)
+    # TODO this is an ugly hack. I dont want underscores on the outdirs
+    part = conf.get(key, key).replace("_", "", 1)
+    return os.path.join(root, conf.get('output'), part, *args)
 
 def write(filename, content):
     if os.path.exists(filename):
-        print "Warning: %s already exists. Overwriting." % filename
+        print("Warning: %s already exists. Overwriting." % filename)
     out = open(filename, 'w')
-    out.write(content.encode('utf-8'))
+    out.write(content)
 
 def remove_old_builds():
     "For now, delete the old site"
@@ -147,27 +155,21 @@ def create_output_dirs():
 
 def move_assets(*assets):
     "Copy styles to site: later we can compress, etc"
-    assets_dirs = [conf.get(asset) for asset in assets]
-    for asset_dir in assets_dirs:
+    for asset_dir in assets:
         if os.path.isdir(source(asset_dir)):
-            shutil.copytree(source(asset_dir), output(asset_dir)) 
+            try:
+                shutil.copytree(source(asset_dir), output(asset_dir)) 
+            except:
+                pass
 
 def is_post(filename):
     "Given a file name, returns true if this is a post"
     return os.path.splitext(filename)[1] == '.md'
 
-"A little Like os.walk, but filters on dirs"
-def walk(root, dirfilter, filefilter):
-    for item in os.listdir(root):
-        path = os.path.join(root, item)
-        if os.path.isdir(path) and dirfilter(path, item):
-            walk(path, dirfilter, filefilter)
-        elif filefilter(path, item):
-            yield path, item
-
 def build_blog():
     posts = []
     posts_dir = source('posts')
+    print("posts dir is", posts_dir)
 
     for path, dirs, filenames in os.walk(posts_dir):
         for post in fnmatch.filter(filenames, '*.md'):
@@ -175,7 +177,6 @@ def build_blog():
             ctx = {'post': p}
 
             template = env.get_template("%s.html" % p.layout)
-
             filename = output('notebook', "%s.html" % p.slug())
             write(filename, template.render(ctx))
 
@@ -183,16 +184,27 @@ def build_blog():
 
     return posts
 
+"A little Like os.walk, but filters on dirs"
+def walk(root, dirfilter, filefilter):
+    for item in os.listdir(root):
+        path = os.path.join(root, item)
+        if os.path.isdir(path) and dirfilter(path, item):
+            for path, item in walk(path, dirfilter, filefilter):
+                yield path, item
+        elif filefilter(path, item):
+            yield path, item
+
 def build_pages(posts):
 
     def dirfilter(path, item):
         "Skip 'special' folders"
-        return not item[0] == '_'
+        return not (item[0] == '_' or item[0] == '.')
 
     def htmlfilter(path, item):
         return os.path.splitext(item)[1] == '.html'
 
     for fullpath, page in walk(source(), dirfilter, htmlfilter):
+        fullpath = fullpath.replace(root, '')[1:]
         p = Post(fullpath)
 
         ctx = {
@@ -200,9 +212,16 @@ def build_pages(posts):
             'page': p
         }
 
+        head, tail = os.path.split(fullpath)
+        if head:
+            try:
+                os.makedirs(output(head))
+            except:
+                pass
+
         template = env.get_template("%s.html" % p.layout)
 
-        filename = output("%s.html" % p.filename)
+        filename = output(os.path.join(head, "%s.html" % p.filename))
         write(filename, template.render(ctx))
 
 def init_jinja():
@@ -222,7 +241,7 @@ def build_site():
     build_pages(posts)
 
     build_demos()
-    move_assets('images', 'styles')
+    move_assets('images', 'styles', 'scripts')
 
 def build_demos():
     "Find all HTML files in the demo directory and syntax highlight them"
@@ -269,20 +288,20 @@ def test_site():
     "Run an HTTP server to serve output directory for testing"
     site = output()
 
-    import BaseHTTPServer
+    import http.server
     import fcntl
-    import SimpleHTTPServer
-    import SocketServer
+    import http.server
+    import socketserver
 
     os.chdir(site)
     server_address = ('', 8000)
-    httpd = BaseHTTPServer.HTTPServer(server_address, SimpleHTTPServer.SimpleHTTPRequestHandler)
+    httpd = http.server.HTTPServer(server_address, http.server.SimpleHTTPRequestHandler)
 
     flags = fcntl.fcntl(httpd.socket.fileno(), fcntl.F_GETFD)
     flags |= fcntl.FD_CLOEXEC
     fcntl.fcntl(httpd.socket.fileno(), fcntl.F_SETFD, flags)
 
-    print "Serving locally at port", 8000 
+    print("Serving locally at port", 8000) 
     httpd.serve_forever()
 
 def update_static():
@@ -293,9 +312,9 @@ def update_static():
         try:
             shutil.rmtree(output_dir)
         except:
-            print("Warning: %s does not exist" % output_dir)
+            print(("Warning: %s does not exist" % output_dir))
 
-    move_assets('styles', 'scripts')
+    move_assets('images', 'styles', 'scripts')
 
 def new_post():
     "Quickly start a new post"
@@ -320,24 +339,24 @@ def new_post():
 def push_remote():
     "Sync output folder with remote server"
     command = "rsync -r -v -e ssh %s %s" % (output(), conf.get('remote_location'))
-    print command
+    print(command)
     p = subprocess.Popen(command.split(),
         shell=False,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE) 
     stdout, stderr = p.communicate()
-    print stdout, stderr
+    print(stdout, stderr)
 
 def invalid_command():
-    return "Unknown command. Try one of: %s" % ', '.join(commands.keys())
+    return "Unknown command. Try one of: %s" % ', '.join(list(commands.keys()))
 
 def command_help(command_name):
     "Pass command name for usage help"
     command = commands.get(command_name, None)
     if command:
-        print command.__doc__
+        print(command.__doc__)
     else:
-        print invalid_command()
+        print(invalid_command())
 
 commands = {
     "build"  : build_site,
@@ -368,11 +387,11 @@ if __name__ == '__main__':
             command_name = args.command[1]
             command_help(command_name)
         else:
-            print command_help.__doc__
+            print(command_help.__doc__)
         exit()
         
     command = commands.get(command, invalid_command)
     result = command()
 
     if result:
-        print result
+        print(result)

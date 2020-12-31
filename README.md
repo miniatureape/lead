@@ -71,8 +71,8 @@ If images are greater than 1024 pixels, they'll automatically be resized for the
 To add code, use triple back ticks, with language direcly after
 
 ```
-\`\`\`python
+`` ```python
 l = [1,2]
+``` ``
 ```
-
 

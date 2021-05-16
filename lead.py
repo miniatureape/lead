@@ -3,11 +3,13 @@
 import os
 import re
 import sys
+import time
 import glob
 import json
 import shutil
 import jinja2
 import fnmatch
+import pathlib
 import optparse
 import markdown
 import subprocess
@@ -39,6 +41,8 @@ default_conf = {
 class Post(object):
 
     def __init__(self, source_path):
+        print("Building", source_path)
+        self.source_path = source_path
         self.source = open(source_path).read()
 
         data = self.find_data(self.source)
@@ -47,12 +51,22 @@ class Post(object):
         self.time = datetime.strptime(self.date, "%Y-%m-%d").strftime("%s")
         self.layout = data.get('layout')
         self.filename = data.get('filename', None)
+        self.unlisted = data.get('unlisted', None)
+
+        self.raw_alsos = data.get('also', [])
+        self.alsos = []
 
         self.raw_content = self.find_raw_content(self.source)
         if data.get('raw', None):
             self.html = self.raw_content
         else:
             self.html = self.process_html(self.raw_content)
+
+    def link_alsos(self, posts):
+        for raw_also in self.raw_alsos:
+            for p in posts:
+                if raw_also == p.title or raw_also == p.slug or raw_also in p.source_path:
+                    self.alsos.append(p)
 
     def find_data(self, source):
         return json.loads(source[:source.index('}') + 1])
@@ -84,7 +98,7 @@ class Post(object):
             orig_image_path = os.path.join(log_images_dir, image_name)
 
             # todo this is another dirty hack to get the _ off the output dirs
-            log_images_dir = log_images_dir.replace("_", "", 1)
+            build_images_dir = log_images_dir.replace("_", "", 1)
 
             if os.path.exists(orig_image_path):
                 im = Image.open(orig_image_path)
@@ -96,9 +110,9 @@ class Post(object):
                     medium_name = "%s.medium%s" % (base, ext,)
                     im.save(os.path.join(log_images_dir, medium_name))
 
-                full_path = os.path.join('/', log_images_dir, image_name)
+                full_path = os.path.join('/', build_images_dir, image_name)
                 if medium_name:
-                    medium_path = os.path.join('/', log_images_dir, medium_name)
+                    medium_path = os.path.join('/', build_images_dir, medium_name)
                 else:
                     medium_path = full_path
 
@@ -106,7 +120,7 @@ class Post(object):
 
             return replace_str
 
-        return re.sub(r'[a-zA-Z0-9_-]+\.(jpg|jpeg|gif|png)', is_log_image, content)
+        return re.sub(r'[a-zA-Z/0-9_-]+\.(jpg|jpeg|gif|png)', is_log_image, content)
 
     def process_html(self, raw_content):
         raw_content = self.replace_images(raw_content)
@@ -117,7 +131,7 @@ class Post(object):
         return slugify(self.title)
 
 def slugify(title):
-    return re.sub(r'[^a-zA-Z0-9_-]', '-', title).lower()    
+    return re.sub(r'[^a-zA-Z0-9_-]', '-', title).lower()
 
 def configure(root):
     conf = {}
@@ -136,8 +150,8 @@ def output(key='', *args):
     return os.path.join(root, conf.get('output'), part, *args)
 
 def write(filename, content):
-    if os.path.exists(filename):
-        print("Warning: %s already exists. Overwriting." % filename)
+    head, tail = os.path.split(filename)
+    pathlib.Path(head).mkdir(parents=True, exist_ok=True)
     out = open(filename, 'w')
     out.write(content)
 
@@ -158,29 +172,27 @@ def move_assets(*assets):
     for asset_dir in assets:
         if os.path.isdir(source(asset_dir)):
             try:
-                shutil.copytree(source(asset_dir), output(asset_dir)) 
+                shutil.copytree(source(asset_dir), output(asset_dir))
             except:
                 pass
-
-def is_post(filename):
-    "Given a file name, returns true if this is a post"
-    return os.path.splitext(filename)[1] == '.md'
 
 def build_blog():
     posts = []
     posts_dir = source('posts')
-    print("posts dir is", posts_dir)
 
     for path, dirs, filenames in os.walk(posts_dir):
         for post in fnmatch.filter(filenames, '*.md'):
             p = Post(os.path.join(path, post))
-            ctx = {'post': p}
 
-            template = env.get_template("%s.html" % p.layout)
-            filename = output('notebook', "%s.html" % p.slug())
-            write(filename, template.render(ctx))
+            if not p.unlisted:
+                posts.append(p)
 
-            posts.append(p)
+    for p in posts:
+        p.link_alsos(posts)
+        template = env.get_template("%s.html" % p.layout)
+        filename = output('notebook', "%s.html" % p.slug())
+        ctx = {'post': p}
+        write(filename, template.render(ctx))
 
     return posts
 
@@ -227,6 +239,7 @@ def build_pages(posts):
 def init_jinja():
     global env
     env = jinja2.Environment(loader=jinja2.FileSystemLoader(source('layouts')))
+    env.filters['slugify'] = slugify
 
 def build_site():
     "Build all content and move with static assets to output directory"
@@ -244,7 +257,16 @@ def build_site():
     move_assets('images', 'styles', 'scripts')
 
 def build_demos():
-    "Find all HTML files in the demo directory and syntax highlight them"
+    """
+    A demo is an html page to be included via an iframe in a log entry.
+    There are three ways you can build a "demo":
+    1. build a json object with html, js and css keys.
+    2. place a single standalone html page in the demos folder
+    3. put a folder of html and assets in a folder.
+
+    2 and 3 just get copied to the built /demos/ path.
+    1 gets built into a page with tab nav, one tab has the highlighted source.
+    """
 
     pygment_afix = '```'
     js_prefix = "%s%s\n" % (pygment_afix, 'javascript')
@@ -255,10 +277,11 @@ def build_demos():
     if not demos_dir:
         return
 
-    pattern = os.path.join(demos_dir, '*.html')
-    demos = glob.glob(pattern)
-
     template = env.get_template("demo.html")
+
+    "Case 1"
+    pattern = os.path.join(demos_dir, '*.json')
+    demos = glob.glob(pattern)
 
     for demo in demos:
         with open(demo) as f:
@@ -281,8 +304,25 @@ def build_demos():
                 "fmt_js": fmt_js,
             }
 
-        output_file = os.path.join(output('demos'), os.path.basename(demo))
+        output_file = os.path.join(output('demos'), os.path.basename(demo).replace('json', 'html'))
         write(output_file, template.render(ctx))
+
+        "Case 2"
+        pattern = os.path.join(demos_dir, '*.html')
+        demos = glob.glob(pattern)
+        for demo in demos:
+            output_file = os.path.join(output('demos'), os.path.basename(demo))
+            with open(demo) as f:
+                write(output_file, f.read())
+
+        "Case 3"
+        demo_folders = [ (f.path, f.name) for f in os.scandir(demos_dir) if f.is_dir() ]
+        for path, name in demo_folders:
+            output_dir = os.path.join(output('demos'), name)
+            try:
+                shutil.copytree(path, output_dir)
+            except Exception as e:
+                print("could not copy", path, "to", output_dir)
 
 def test_site():
     "Run an HTTP server to serve output directory for testing"
@@ -301,12 +341,12 @@ def test_site():
     flags |= fcntl.FD_CLOEXEC
     fcntl.fcntl(httpd.socket.fileno(), fcntl.F_SETFD, flags)
 
-    print("Serving locally at port", 8000) 
+    print("Serving locally at port", 8000)
     httpd.serve_forever()
 
 def update_static():
     "Build and move only static assets to output directory"
-    output_dirs = (output(conf.get('styles')), 
+    output_dirs = (output(conf.get('styles')),
                     output(conf.get('scripts')),)
     for output_dir in output_dirs:
         try:
@@ -322,6 +362,7 @@ def new_post():
         "title": "Untitled Post",
         "date": date.today().strftime("%Y-%m-%d"),
         "layout": "post",
+        "unlisted": True,
     }
 
     filename = "%s-%s.md" % (stub.get('title'), stub.get('date'))
@@ -343,7 +384,7 @@ def push_remote():
     p = subprocess.Popen(command.split(),
         shell=False,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE) 
+        stderr=subprocess.PIPE)
     stdout, stderr = p.communicate()
     print(stdout, stderr)
 
@@ -358,10 +399,80 @@ def command_help(command_name):
     else:
         print(invalid_command())
 
+def command_dev():
+    from watchdog.observers import Observer
+    from watchdog.events import FileSystemEventHandler
+
+    from multiprocessing import Process
+    from http.server import HTTPServer, SimpleHTTPRequestHandler
+
+    def create_server():
+        site = output()
+        os.chdir(site)
+        httpd = HTTPServer(('', 8000), SimpleHTTPRequestHandler)
+        httpd.serve_forever()
+
+    class Rebuilder(FileSystemEventHandler):
+
+        p = None
+
+        def stop_server(self):
+            if self.p:
+                print("Stopping server")
+                self.p.terminate()
+
+        def rebuild(self):
+            os.chdir('/home/justin/projects/justindonato.com/')
+            update_static()
+            build_site()
+
+        def start_server(self):
+            if self.p:
+                self.stop_server()
+            print("Starting Server")
+            self.p = Process(target=create_server)
+            self.p.start()
+
+        def on_modified(self, event):
+            if self.should_rebuild(event):
+                self.stop_server()
+                print("Rebuilding")
+                self.rebuild()
+                self.start_server()
+
+        def should_rebuild(self, event):
+            if event.is_directory:
+                return False
+            base, ext = os.path.splitext(event.src_path)
+            if ext == ".swp":
+                return False
+            if output() in event.src_path:
+                return False
+            print("should rebuild", event.src_path)
+            return True
+
+    rebuilder = Rebuilder()
+    rebuilder.start_server()
+
+    site = output()
+    os.chdir(site)
+
+    observer = Observer()
+    observer.schedule(rebuilder, "/home/justin/projects/justindonato.com/", recursive=True)
+    observer.start()
+
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        observer.stop()
+    observer.join()
+
 commands = {
     "build"  : build_site,
     "test"   : test_site,
     "static" : update_static,
+    "dev"   : command_dev,
     "new"    : new_post,
     "push"   : push_remote,
     "help"   : command_help,
@@ -381,7 +492,7 @@ if __name__ == '__main__':
     except IndexError:
         command_help("")
         exit()
-    
+
     if command == 'help':
         if len(args.command) > 1:
             command_name = args.command[1]
@@ -389,7 +500,7 @@ if __name__ == '__main__':
         else:
             print(command_help.__doc__)
         exit()
-        
+
     command = commands.get(command, invalid_command)
     result = command()
 

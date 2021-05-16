@@ -16,11 +16,13 @@ import subprocess
 from PIL import Image
 from datetime import date
 from datetime import datetime
+from datetime import timezone
 from bs4 import BeautifulSoup
 from operator import attrgetter
 from pygments import highlight
 from pygments.lexers import get_lexer_by_name
 from pygments.formatters import HtmlFormatter
+from feedgen.feed import FeedGenerator
 
 md   = None
 env  = None
@@ -180,11 +182,28 @@ def build_blog():
     posts = []
     posts_dir = source('posts')
 
+    fg = FeedGenerator()
+    fg.title('www.justindonato.com')
+    fg.id('www.justindonato.com')
+    fg.description('Posts from www.justindonato.com')
+    fg.link( href='https://www.justindonato.com/feed.atom', rel='self' )
+    fg.language('en')
+
     for path, dirs, filenames in os.walk(posts_dir):
         for post in fnmatch.filter(filenames, '*.md'):
             p = Post(os.path.join(path, post))
 
             if not p.unlisted:
+
+                fe = fg.add_entry()
+                fe.id('https://www.justindonato.com/notebook/' + p.slug() + '.html')
+                fe.title(p.title)
+                fe.link(href="https://www.justindonato.com/feed/")
+                pubdate = datetime.strptime(p.date, '%Y-%m-%d')
+                pubdate = pubdate.replace(tzinfo=timezone.utc)
+                fe.published(published=pubdate)
+                fe.updated(updated=pubdate)
+
                 posts.append(p)
 
     for p in posts:
@@ -193,6 +212,9 @@ def build_blog():
         filename = output('notebook', "%s.html" % p.slug())
         ctx = {'post': p}
         write(filename, template.render(ctx))
+
+    fg.atom_file(output('atom.xml'))
+    fg.rss_file(output('rss.xml'))
 
     return posts
 
